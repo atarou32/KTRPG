@@ -1,0 +1,5 @@
+testdesu
+port=20000
+ready for accept
+<<child count:0>>
+select: Interrupted system call
