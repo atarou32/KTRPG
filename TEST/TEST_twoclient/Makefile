@@ -1,5 +1,5 @@
-PROGRAM = server
-OBJS = main.o server.o daemon.o my_handler.o my_mysql.o
+PROGRAM = main
+OBJS = main.o resultcheck.o
 SRCS = $(OBJS: %.o=%.c)
 CFLAGS = -g -Wall
 LDLIBS = -lpthread -lz -lm -ldl

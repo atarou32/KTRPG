@@ -9,7 +9,7 @@ volatile extern int g_gothangup;
 int server_socket(const char* portnm) {
   char nbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
   struct addrinfo hints, *res0;
-  int soc, opt, errcode;
+  int soc, opt, errcode,val;
   socklen_t opt_len;
 
   memset(&hints, 0, sizeof(hints));
@@ -50,6 +50,11 @@ int server_socket(const char* portnm) {
      freeaddrinfo(res0);
      return -1;
    }
+   
+   // ノンブロッキングモードに設定
+	val = 1;
+	ioctl(soc, FIONBIO, &val);
+	
    if (listen(soc, SOMAXCONN) == -1) {
      perror("listen");
      close(soc);
@@ -60,30 +65,73 @@ int server_socket(const char* portnm) {
    return soc;
 }
 
-int send_recv_loop(int acc, int child_no) {
-  char buf[512], *ptr;
+int send_recv_loop(int acc, int child_no, int* childs, int childsnum, int* childs_count) {
+  char buf[512], buf2[512], *ptr;
   ssize_t len;
+  int i;
+  int flg=0; 
+  memset(buf,0,512);
+  if ((len = recv(acc, buf, sizeof(buf),flg & ~MSG_PEEK)) == -1) {
   
-  if ((len = recv(acc, buf, sizeof(buf),0)) == -1) {
-    perror("recv");
-    return -1;
+  	if (errno != EAGAIN) {
+  		fprintf(stderr, "errno=%d",errno); 
+  		perror("recv");
+    	return -1;
+  	}
+  	if (errno > 0 ) {
+		fprintf(stderr,"errno=%d\n\n\n", errno);
+	}
   }
   if (len ==0) {
+  	fprintf(stderr, "errno=%d,acc=%d,child_no=%d",errno,acc,child_no); 
     fprintf(stderr, "recv:EOF\n");
-    return -1;
+  	if (errno != EAGAIN) {
+  		
+    	return -1;
+  	}
   }
   buf[len] = '\0';
-  if ((ptr = strpbrk(buf, "\r\n")) != NULL) {
+  /*if ((ptr = strpbrk(buf, "\r\n")) != NULL) {
     *ptr = '\0';
-  }
-  fprintf(stderr, "[client]%s\n", buf);
-  mystrlcat(buf, ":OK\r\n", sizeof(buf));
-  len = (ssize_t) strlen(buf);
-  if ((len = send(acc, buf, (size_t)len, 0)) == -1) {
-    perror("send");
-    return -1;
+  }*/
+	
+	
+  memset(buf2,0,512);
+//  usleep(3000);
+  fprintf(stderr, "[rcvd cno:%d %d]%s",child_no, len,buf);
+//	usleep(3000);
+	fprintf(stderr, buf);
+ // mystrlcat(buf, ":OK\n", sizeof(buf));
+ // snprintf(buf2, 512, "[cno.%d]%s",child_no,buf);
+	strcat(buf2,buf);
+//  mystrlcat(buf2,buf, sizeof(buf2));
+
+  len = (ssize_t) strlen(buf2);
+  if ((len = send(acc, buf2, (size_t)len, 0)) == -1) {
+  	if (errno != EAGAIN) {
+  		fprintf(stderr, "acc=%d,child_no=%d child_count=%d\n",acc,child_no, *childs_count); 
+    	perror("send");
+    	return -1;
+  	}
   }
 
+  for (i=0;i<childsnum;i++) {
+    if (i != child_no) {
+      len = (ssize_t)strlen(buf2);
+    	if (childs[i] != -1) {
+          if((len = send(childs[i],buf2, (size_t)len, 0)) == -1) {
+          	if (errno != EAGAIN) {
+          		fprintf(stderr, "acc=%d,child_no=%d,child_count=%d\n",acc,child_no,*childs_count); 
+         	   perror("send");
+         	//  close(childs[i]);
+         	 // childs[i] = -1;
+          	 // *childs_count = *childs_count -1;;
+              continue;
+          	}
+        }
+      }
+    }
+  }
   return 0;
   
 }
@@ -105,13 +153,13 @@ void accept_loop(int soc) {
   }
   child_no = 0;
 
-  for (;g_gotterm == 0 || g_gothangup == 0;) {
+  for (;(g_gotterm == 0) && (g_gothangup == 0);) {
     FD_ZERO(&mask);
     FD_SET(soc, &mask);
     width = soc + 1;
     count = 0;
 
-    for ( i = 0 ;i<child_no; i++) {
+    for ( i = 0 ;i<MAX_CHILD; i++) {
       if (child[i] != -1) {
         FD_SET(child[i], &mask);
         if (child[i]+1 > width) {
@@ -121,8 +169,8 @@ void accept_loop(int soc) {
       }
     }
 
-    fprintf(stderr, "<<child count:%d>>\n", count);
-    timeout.tv_sec = 10;
+    fprintf(stderr, "\n<<child count:%d>>\n", child_no);
+    timeout.tv_sec = 1;
     timeout.tv_usec = 0;
     switch (select(width, (fd_set *)&mask, NULL,NULL, &timeout)) {
       case -1:
@@ -138,6 +186,7 @@ void accept_loop(int soc) {
             if (errno != EINTR) {
               perror("accept");
             }
+          	acc = -1;
           } else {
             getnameinfo((struct sockaddr*)&from, len,
                   hbuf, sizeof(hbuf),
@@ -145,7 +194,7 @@ void accept_loop(int soc) {
                   NI_NUMERICHOST | NI_NUMERICSERV);
             fprintf(stderr, "accept:%s:%s\n", hbuf, sbuf);
             pos = -1;
-            for (i=0;i<child_no; i++) {
+            for (i=0;i<MAX_CHILD; i++) {
               if (child[i] == -1) {
                 pos = i;
                 break;
@@ -156,23 +205,27 @@ void accept_loop(int soc) {
                 (void)fprintf(stderr, "child is full: cannot accept\n");
                 close(acc);
               } else {
-                child_no++;
-                pos = child_no -1;
+              	fprintf(stderr,"child no pos: cannot accept\n");
+              	close(acc);
               }
             }
             if (pos != -1) {
               child[pos] = acc;
+              child_no++;
+            acc = -1;
             }
           }
         }
 
-        for (i=0;i<child_no;i++) {
+        for (i=0;i<MAX_CHILD;i++) {
           if (child[i] != -1) {
             if (FD_ISSET(child[i], &mask)) {
-              ret = send_recv_loop(child[i], i);
+              ret = send_recv_loop(child[i], i, child,MAX_CHILD,&child_no);
               if (ret == -1) {
                 close(child[i]);
                 child[i] = -1;
+              	child_no--;
+              	break;
               }
             }
           }

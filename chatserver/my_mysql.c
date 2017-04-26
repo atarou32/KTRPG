@@ -1,16 +1,16 @@
 #include "my_mysql.h"
-#include "mysql/mysql.h"
+//#include "mysql/mysql.h"
 #include "stdio.h"
 #include "stdlib.h"
 
-#define DBHOST "192.168.11.207"
+#define DBHOST "192.168.11.101"
 #define DBUSER "root"
 #define DBPASS "rootdesuyo"
 #define DBNAME "KTRPG"
 
 
 void test_connect() {
-
+/*
   MYSQL *conn;
   MYSQL_RES *res;
   MYSQL_ROW row;
@@ -21,5 +21,6 @@ void test_connect() {
     return -1;
   }
   mysql_close(conn);
+*/	
   return 0;
 }

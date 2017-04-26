@@ -20,7 +20,7 @@
 
 
 int server_socket(const char* portnm);
-int send_recv_loop(int acc, int child_no);
+int send_recv_loop(int acc, int child_no, int* childs,int max_child_count, int* child_count);
 void accept_loop(int soc);
 size_t mystrlcat(char* dst, const char* src, size_t size);
 

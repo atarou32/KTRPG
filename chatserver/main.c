@@ -14,7 +14,7 @@ volatile int g_gothangup;
 
 
 int main(int argc, char** argv) {
-  int soc;
+  int soc, i;
   char buf[256];
   g_gotpipe = 0;
   g_gotint = 0;
@@ -22,14 +22,17 @@ int main(int argc, char** argv) {
   g_gotterm = 0;
   g_gothangup = 0;
 
-  test_connect();
-  return 0;
-  if (argc <=1) {
-    fprintf(stderr, "server port\n");
+ // test_connect();
+//  return 0;
+  if (argc <=2) {
+    fprintf(stderr, "server port daemon_flg \n");
     return EX_USAGE;
   }
 
-  daemonize(1,0);
+  i = atoi(argv[2]);
+  if (i != 0) {
+    daemonize(1,0);
+  }
   syslog(LOG_USER|LOG_NOTICE, "daemon:cwd%s\n", getcwd(buf, sizeof(buf)));
   set_my_sig_action();
  
