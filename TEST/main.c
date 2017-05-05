@@ -35,7 +35,7 @@ main.exeÇ™Ç≈Ç´ÇΩÇ†Ç∆Ç…Å@main.exeÇëñÇÁÇπÇƒ
 
 int main(int argc, char** argv) {
 	
-	int temp;
+	int temp, pid,status;
 	DIR *dir;
 	struct dirent *dp;
 	struct stat st;
@@ -62,12 +62,21 @@ int main(int argc, char** argv) {
 				exit(-1);
 			}
 			
-			if (execl("./main.exe","./main.exe",NULL) == -1) {
-				writeToErrorTxt("error main\n",11);
-				perror("main execl");
-				closedir(dir);
-				exit(-1);
+			
+			pid = fork();
+			if (pid == 0) {
+				
+				if (execl("./main.exe","./main.exe",NULL) == -1) {
+					writeToErrorTxt("error main\n",11);
+					perror("main execl");
+					closedir(dir);
+					return 0;
+				}
+				return 0;
 			}
+			
+			wait(&status);
+			
 			
 			if (chdir("../") != 0) {//execl("cd", "cd","../",NULL) == -1) {
 				writeToErrorTxt("error exec\n",11);
