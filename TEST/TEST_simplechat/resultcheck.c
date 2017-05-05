@@ -13,6 +13,16 @@ int result_check(char* buf, int buflen) {
 		return 0;
 	}
 	
+	temp = strstr(buf, "<<child count:1>>");
+	if (temp == NULL) {
+		return 0;
+	}
+	
+	temp = strstr(buf, "never give up");
+	if (temp == NULL) {
+		return 0;
+	}
+	
 	temp = strstr(buf, "select: Interrupted system call");
 	if (temp == NULL) {
 		return 0;

@@ -28,7 +28,7 @@ int writeToErrorTxt(char* buf, int buflen) {
 }
 
 #define FILEBUFSIZE 1024*128
-#define CLIENT_NUM 1
+#define CLIENT_NUM 16
 /*
 êe
 pid
