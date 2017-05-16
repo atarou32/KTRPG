@@ -24,11 +24,12 @@
 #define DB_QUE_STATUS_NOUSE 0
 
 typedef struct db_que {
-	unsigned int index1;
-	unsigned int index2;
-	unsigned int index3;
-	void* data;
-	unsigned short index4;
+	time_t send_time;
+	unsigned int db_func_id;
+	unsigned int data1;
+	unsigned int data2;
+	void* data_void;
+	unsigned short data3;
 	unsigned char status; // 更新を含む処理かどうか // 変更が行われるデータを含む処理かどうか  どちらでもない場合memcachedにdbのselect内容を保存する
 	unsigned char isuse;
 	void* sql_conn;

@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/shm.h>
+#include <sys/mman.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -10,16 +12,22 @@
 #include <sys/msg.h>
 #include "errno.h"
 #include"stdio.h"
+#include "commondef.h"
 
 
 #ifdef IAMWINDOWS
 static HANDLE mutex;
 #else
-static pthread_mutex_t mutex;
+static pthread_mutex_t* mutex;
 #endif
 
 static int log_pid;
 static int log_msgqid;
+#ifndef IAMWINDOWS
+  pthread_mutexattr_t logmat;
+  int logmathandle=0;
+  char* logmatmemory;
+#endif
 
 int writelog(int log_type, const char* buffer);
 
@@ -29,16 +37,29 @@ void initlog() {
 	int temp;
 	int msgqid;
 	int nomsg=0;
-	struct msgbuf {
-		long mtype;
-		char mtext[512];
-	} mbuf;
+	
+
+	
 	
 	log_msgqid = msgget(ftok("./QPATH.txt",1), IPC_CREAT | IPC_EXCL | 0666);
+	if (log_msgqid == -1) {
+		perror("log:msgget");
+	}
+	
 	#ifdef IAMWINDOWS
 		mutex = CreateMutex(NULL,0,"LOGMUTEX");
 	#else
-		pthread_mutex_init(&mutex, NULL);
+		pthread_mutexattr_init(&logmat);
+		if (pthread_mutexattr_setpshared(&logmat, PTHREAD_PROCESS_SHARED) != 0) {
+		    perror("log:pthread_mutexattr_setpshared");
+			
+  		}
+	logmathandle = shm_open("/shmlogmat", O_CREAT | O_RDWR, 0777);
+	ftruncate(logmathandle, sizeof(pthread_mutex_t));
+	logmatmemory = (char*)mmap(0,sizeof(pthread_mutex_t), PROT_READ|PROT_WRITE, MAP_SHARED, logmathandle, 0);
+	mutex = (pthread_mutex_t*)logmatmemory;
+		pthread_mutex_init(mutex, &logmat);
+		pthread_mutexattr_destroy(&logmat);
 	#endif
 	pid = fork();
 	if (pid >0) {
@@ -54,11 +75,24 @@ void initlog() {
 		msgqid = msgget(ftok("./QPATH.txt",1), IPC_EXCL | 0666);
 		// 子プロセスではループさせる
 		while(1) {
+			struct msgbuf {
+				long mtype;
+				char mtext[512];
+			} mbuf;
+			int i=0;
 			nomsg = 1;
-				mbuf.mtype = typ;
-				if ((temp=msgrcv(msgqid, &mbuf,512, 0, IPC_NOWAIT)) < 0) {
+			
+			for (i=0;i<LOG_MAX;i++) {
+				mbuf.mtype = i;
+			
+				temp=msgrcv(msgqid, &mbuf,512, 0, MSG_NOERROR);
+				if (temp < 0) {
 					if (errno == ENOMSG) {
 						// ループを続ける
+					} else {
+						if (temp == -1) {
+							perror("in logthread:");
+						}
 					}
 				} else {
 					
@@ -68,6 +102,8 @@ void initlog() {
 						nomsg = 0;
 					}
 				}
+			}
+			
 			
 			if (nomsg == 1) {
 				usleep(100);
@@ -130,6 +166,9 @@ char* getLogFileName(int log_type) {
 
 int writelog(int log_type, const char* buffer) {
 	FILE* file;
+	#ifdef IAMWINDOWS
+	HANDLE h;
+	#endif
 	
 	#ifdef IAMWINDOWS
 	h = OpenMutex(MUTEX_ALL_ACCESS,0,"LOGMUTEX");
@@ -138,23 +177,23 @@ int writelog(int log_type, const char* buffer) {
 	}
 	
 	#else 
-	pthread_mutex_lock(&mutex);
+	pthread_mutex_lock(mutex);
 	#endif
 	if (0 == (file = fopen(getLogFileName(log_type),"a"))) {
 		#ifdef IAMWINDOWS
 			ReleaseMutex(h);
 		#else 
-			pthread_mutex_unlock(&mutex);
+			pthread_mutex_unlock(mutex);
 		#endif
 		return LOG_NO;
 	}
-	fwrite(buffer,1,strlen(buffer),file);
+	fwrite(buffer,strlen(buffer),1,file);
 	fwrite("\n",1,1,file);
 	fclose(file);
 	#ifdef IAMWINDOWS
 	ReleaseMutex(h);
 	#else 
-	pthread_mutex_unlock(&mutex);
+	pthread_mutex_unlock(mutex);
 	#endif
 	
 	return LOG_OK;
@@ -216,7 +255,7 @@ int mylog(int log_user, int log_type, const char* buffer, ...) {
 	mbuf.mtype = log_type;
 	
 	// メッセージキューにメッセージを入れる
-	if (msgsnd(log_msgqid, &mbuf, 512,IPC_NOWAIT)!= 0) {
+	if (msgsnd(log_msgqid, &mbuf, 512,0)!= 0) {
 		perror("msgsnd");
 		return LOG_NO;
 	}
@@ -267,13 +306,13 @@ int mylogd(int log_user, int log_type, const char* buffer, ...) {
 	}
 	
 	#else 
-	pthread_mutex_lock(&mutex);
+	pthread_mutex_lock(mutex);
 	#endif
 	if (0 == (file = fopen(getLogFileName(log_type),"a"))) {
 		#ifdef IAMWINDOWS
 			ReleaseMutex(h);
 		#else 
-			pthread_mutex_unlock(&mutex);
+			pthread_mutex_unlock(mutex);
 		#endif
 		return LOG_NO;
 	}
@@ -284,7 +323,7 @@ int mylogd(int log_user, int log_type, const char* buffer, ...) {
 	#ifdef IAMWINDOWS
 	ReleaseMutex(h);
 	#else 
-	pthread_mutex_unlock(&mutex);
+	pthread_mutex_unlock(mutex);
 	#endif
 
 	fprintf(stderr,prefix);
@@ -297,22 +336,28 @@ int mylogd(int log_user, int log_type, const char* buffer, ...) {
 
 void releaselog() {
 	int status;
+	struct msqid_ds * buf;
 	
 	// 子プロセスを殺す
 	kill(log_pid,SIGHUP);
 	wait(&status);
 	
+	msgctl(log_msgqid, IPC_RMID,buf);
 	
 	#ifdef IAMWINDOWS
 	CloseHandle(mutex);
 	#else
+	munmap(logmatmemory, sizeof(pthread_mutex_t));
+	shm_unlink("/shmlogmat");
 	#endif
 	
 	
 	
 }
 
+/*
 int main() {
+
 	printf("initlog:\n");
 	initlog();
 	printf("initlogend\n");
@@ -324,4 +369,6 @@ int main() {
 	printf("releaselog\n");
 	releaselog();
 	printf("releaselogend\n");
+	
 }
+*/
